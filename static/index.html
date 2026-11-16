@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BiliLab · AI 账号观测台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234c8dff'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/echarts.min.js"></script>
+<script src="/static/qrcode.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span>BiliLab</div>
+    <div class="sub">AI 账号观测台</div>
+    <nav>
+      <button class="nav-btn" data-view="login">① 登录</button>
+      <button class="nav-btn" data-view="sync">② 抓取</button>
+      <button class="nav-btn" data-view="dash">③ 看板</button>
+    </nav>
+    <div class="who" id="who">未登录</div>
+  </aside>
+
+  <main>
+    <!-- 登录 -->
+    <section class="view" id="view-login">
+      <header class="vh"><h1>登录</h1><p>扫码登录，或手动粘贴 SESSDATA。凭证用 Windows DPAPI 加密后存于本机。</p></header>
+      <div class="grid2">
+        <div class="card" id="card-loggedin" hidden>
+          <h3>已登录</h3>
+          <div class="acct"><img id="avatar" alt=""><div><div id="uname" class="big"></div><div id="umid" class="muted"></div></div></div>
+          <div class="row"><button class="btn ghost" id="btn-relogin">重新登录</button><button class="btn ghost danger" id="btn-logout">退出登录</button></div>
+        </div>
+        <div class="card" id="card-qr">
+          <h3>扫码登录 <span class="tag-ok">推荐</span></h3>
+          <div class="qrbox"><div id="qr"></div><div id="qrstatus" class="muted">正在生成二维码…</div></div>
+          <button class="btn ghost" id="btn-refreshqr">刷新二维码</button>
+        </div>
+        <div class="card" id="card-paste">
+          <h3>手动粘贴</h3>
+          <p class="muted">从浏览器 DevTools → Application → Cookies → bilibili.com 复制 <code>SESSDATA</code> 的值；也可整段粘贴 Cookie 字符串。</p>
+          <textarea id="paste" rows="4" placeholder="SESSDATA=... 或直接粘贴整串 Cookie"></textarea>
+          <button class="btn" id="btn-paste">使用此凭证登录</button>
+          <div id="paste-msg" class="msg"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 抓取 -->
+    <section class="view" id="view-sync" hidden>
+      <header class="vh"><h1>抓取</h1><p>选择每个账号抓多少条视频，然后开始。中途可停止，数据按账号增量落盘。</p></header>
+      <div class="card">
+        <div class="form-row">
+          <label>每个账号抓取</label>
+          <select id="maxvideos">
+            <option value="10">最近 10 条（约 3 分钟）</option>
+            <option value="20" selected>最近 20 条（约 6 分钟）</option>
+            <option value="50">最近 50 条（约 15 分钟）</option>
+            <option value="0">全部视频（视账号体量）</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>抓取速度</label>
+          <select id="speed">
+            <option value="4">稳健 · 4 次/秒（最保守）</option>
+            <option value="8" selected>标准 · 8 次/秒（推荐）</option>
+            <option value="12">极速 · 12 次/秒（有被限流风险）</option>
+            <option value="16">暴力 · 16 次/秒</option>
+          </select>
+        </div>
+        <div class="form-row"><label>关注分组</label><div id="tags" class="chips"><span class="muted">登录后加载</span></div></div>
+        <div class="row">
+          <button class="btn" id="btn-start">开始抓取</button>
+          <button class="btn ghost danger" id="btn-stop">停止</button>
+        </div>
+      </div>
+
+      <div class="card" id="progcard" hidden>
+        <div class="prog-head"><span id="prog-phase">—</span><span id="prog-eta" class="muted"></span></div>
+        <div class="bar"><i id="bar-acc"></i></div><div class="bar-lbl" id="lbl-acc">账号 0 / 0</div>
+        <div class="bar"><i id="bar-vid" class="alt"></i></div><div class="bar-lbl" id="lbl-vid">视频 0</div>
+        <div class="stats" id="prog-stats"></div>
+        <div class="log" id="prog-log"></div>
+      </div>
+
+      <div class="card">
+        <h3>自动记录</h3>
+        <p class="muted">到了闹铃时间就自动抓一次快照（同一时刻每天只跑一次，关机错过超过 90 分钟则不补跑）。每次都是独立文件，不会覆盖旧数据——这正是后面算「增速/衰减」的基础。</p>
+        <div class="form-row">
+          <label>定时快照</label>
+          <label class="switch"><input type="checkbox" id="auto-on"> <span>启用</span></label>
+          <span class="muted" id="auto-next">—</span>
+        </div>
+        <div class="form-row">
+          <label>每日闹铃</label>
+          <input id="alarm-time" class="input" type="time" min="00:00" max="23:59" step="60" value="06:00" style="width:130px">
+          <button class="btn ghost" id="btn-add-alarm">添加</button>
+          <span class="muted">（00:00–23:59，可以加多个）</span>
+        </div>
+        <div class="form-row">
+          <label>已设闹铃</label>
+          <div id="alarm-list" class="chips"><span class="muted">还没有</span></div>
+        </div>
+        <div class="form-row">
+          <label>每次抓取</label>
+          <select id="auto-maxv">
+            <option value="10">最近 10 条</option>
+            <option value="20" selected>最近 20 条</option>
+            <option value="50">最近 50 条</option>
+            <option value="0">全部视频</option>
+          </select>
+          <select id="auto-rate">
+            <option value="4">稳健 4 次/秒</option>
+            <option value="8" selected>标准 8 次/秒</option>
+            <option value="12">极速 12 次/秒</option>
+          </select>
+        </div>
+        <div class="row"><button class="btn" id="btn-auto-save">保存设置</button><span class="msg" id="auto-msg"></span></div>
+      </div>
+
+      <div class="card">
+        <h3>开机启动</h3>
+        <p class="muted">注册到当前用户的启动项后，开机时用 <code>pythonw</code> 静默拉起服务（不弹黑窗、不自动开浏览器），你双击「打开看板」就能看。
+          位置：<code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>，取消勾选即删除该条。</p>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="startup-on"> <span>开机自动启动服务</span></label>
+        </div>
+        <div class="muted" id="startup-cmd" style="margin-top:8px;font-size:12px"></div>
+      </div>
+    </section>
+
+    <!-- 看板 -->
+    <section class="view" id="view-dash" hidden>
+      <header class="vh">
+        <h1>看板</h1>
+        <div class="row">
+          <select id="snap-select"></select>
+          <button class="btn ghost" id="btn-reload">刷新</button>
+          <a class="btn ghost" id="dl-json">导出 JSON</a>
+          <a class="btn ghost" id="dl-videos">视频 CSV</a>
+          <a class="btn ghost" id="dl-accounts">账号 CSV</a>
+        </div>
+      </header>
+      <div id="dash-empty" class="card muted">还没有数据，先去「抓取」跑一次。</div>
+      <div id="dash-body" hidden>
+        <div class="kpis" id="kpis"></div>
+        <div class="tabs" id="dash-tabs">
+          <button class="tab active" data-tab="rank">账号排行</button>
+          <button class="tab" data-tab="single">单账号</button>
+          <button class="tab" data-tab="cross">总览</button>
+          <button class="tab" data-tab="trend">趋势</button>
+        </div>
+        <div class="pane" id="pane-rank">
+          <div class="row"><input id="q" class="input" placeholder="搜索账号名 / UID"><span class="muted" id="rank-count"></span></div>
+          <div class="tablewrap"><table id="tbl-rank"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div class="pane" id="pane-single" hidden>
+          <div class="row">
+            <div class="combo">
+              <input id="acc-q" class="input" placeholder="搜索账号名 / UID，回车跳到第一个" autocomplete="off">
+              <div id="acc-list" class="combo-list" hidden></div>
+            </div>
+            <span class="muted" id="acc-meta"></span>
+          </div>
+          <div class="chart" id="chart-single-view"></div>
+          <div class="chart" id="chart-single-rate"></div>
+          <div class="cap"><b>发布时间分布</b> — 该账号 24 小时的投稿分布（本地时间）。深色柱是 0–6 点「凌晨档」。
+            柱子形状能看出是定点日更，还是想到才发。</div>
+          <div class="chart" id="chart-single-hours"></div>
+          <div class="cap"><b>视频时长分布</b> — 该账号作品的时长结构，从 &lt;1 分钟到 &gt;15 分钟。短内容多说明是模板化批量生产，长内容多说明投入了剪辑成本。</div>
+          <div class="chart" id="chart-single-dur"></div>
+          <div class="tablewrap"><table id="tbl-top"><thead></thead><tbody></tbody></table></div>
+          <div class="cap"><b>单视频追踪</b> — 点上面表格任意一行，看这条视频在<b>各次快照</b>里的播放增长与互动率变化。
+            这是唯一能看出「一条视频是怎么跑起来的」的视角。</div>
+          <div class="chart" id="chart-video-history"></div>
+        </div>
+        <div class="pane" id="pane-cross" hidden>
+          <div class="cap"><b>① 总播放排行</b> — 把每个账号所有已抓视频的播放量相加后排序，用来看「谁真正被看见」。
+            上面的输入框设定窗口里显示多少个账号，右侧滑块可以上下滚动整个榜单；横轴会自动按当前窗口里的最大值缩放。注意它会被发文数量和时间积累影响，发得多的账号天然占优。</div>
+          <div class="row" style="margin:0 4px 8px;gap:8px">
+            <span class="muted">显示前</span>
+            <input id="topn" class="input numinput" type="number" min="5" max="500" step="5" value="20">
+            <span class="muted">个账号（回车生效；右侧滑块上下滚动）</span>
+          </div>
+          <div class="chart" id="chart-top"></div>
+          <div class="cap"><b>② 发布日期 → 播放</b> — 每条视频一个点：横轴是<b>发布日期</b>，纵轴是播放量（对数刻度）。
+            同一天里点越高，说明这条视频起量越好。<b>绿色虚线</b>是全窗口的平均播放，<b>橙色折线</b>是每天发布视频的平均播放——折线在虚线之上说明那天跑赢了大盘，反之则拖后腿。
+            <span class="muted">近</span>
+            <input id="agedays" class="input numinput" type="number" min="1" max="365" step="1" value="14">
+            <span class="muted">天（回车生效）</span></div>
+          <div class="chart" id="chart-age"></div>
+          <div class="cap"><b>③ 粉丝数 vs 中位播放</b> — 每个账号一个点：横轴粉丝数、纵轴该账号视频播放量的中位数（都用对数刻度）。
+            点在虚线上方表示粉丝转化好，下方表示粉丝多但没人看。</div>
+          <div class="chart" id="chart-fans"></div>
+          <div class="cap"><b>④ 发布密度时间线</b> — 柱状是每个时间档全组发出的视频条数，折线是同档内的独立账号数。
+            横轴是<b>真实日期</b>，不是“距今多久”，所以能看出这波风是什么时候起来的、有没有日周期。
+            <span class="muted">近</span>
+            <input id="tldays" class="input numinput" type="number" min="1" max="365" step="1" value="14">
+            <span class="muted">天（回车生效）。分档粒度自动适配：窗口短时按小时切，窗口长了自动压成天、甚至多天一柱——右边会显示当前每根柱子代表多久。</span></div>
+          <div class="chart" id="chart-timeline"></div>
+          <div class="cap"><b>⑤ 全组发布时段分布</b> — 所有账号合起来，24 小时里每个钟点发了多少条。深色是凌晨档。
+            柱子起伏越大，说明这批号越可能在同一套「几点发」的模板里运转；越平说明越随机。</div>
+          <div class="chart" id="chart-hours"></div>
+          <div class="cap"><b>⑥ 每个账号的首条视频时间</b> — 按天统计「当天第一次发视频的账号数」（柱），以及累计开号数（折线）。
+            柱子最高的那天就是集中开号日，折线的斜率就是这波风的加速度。
+            <br>注意：只统计<b>能确定首条</b>的账号——作品超过 20 条的号，我们只抓到最近 20 条，真正首条不可知，会被排除。</div>
+          <div class="chart" id="chart-firstpost"></div>
+          <div class="cap"><b>⑦ 全组视频时长分布</b> — 所有账号作品的时长结构。看的是这批内容的生产方式：&lt;1 分钟占比越高，越接近模板批量生成。</div>
+          <div class="chart" id="chart-dur"></div>
+          <div class="cap"><b>⑧ 存活分布（滞后指标）</b> — 按「距最近一次投稿多少天」给账号分桶。左边越多说明越活跃；右边那几根就是已经掉队的号。
+            这个指标有滞后性——刚停更一两天的号还看不出结局，建议连续观察 5–7 天再看拐点。</div>
+          <div class="chart" id="chart-survive"></div>
+          <div class="cap"><b>⑨ 非存活账号趋势</b> — 横轴是快照时间，柱状是「截止该时刻，超过 N 天没更新」的账号数，折线是存活率。
+            观察天数控制横轴范围，判定天数 N 控制「多久不更新算死」。N 越大曲线越平，N 越小越敏感。<br>左轴柱状＝非存活账号数，右轴绿线＝存活率。</div>
+          <div class="row" style="margin:0 4px 8px;gap:8px">
+            <span class="muted">观察</span>
+            <input id="svdays" class="input numinput" type="number" min="1" max="120" step="1" value="14">
+            <span class="muted">天 ｜ 超过</span>
+            <input id="svn" class="input numinput" type="number" min="0.5" max="60" step="0.5" value="3">
+            <span class="muted">天没更新算非存活（输入即生效）</span>
+          </div>
+          <div class="chart" id="chart-survival"></div>
+        </div>
+        <div class="pane" id="pane-trend" hidden>
+          <div id="trend-note" class="card muted"></div>
+          <div class="row" style="margin:0 4px 8px;gap:8px">
+            <span class="muted">显示前</span>
+            <input id="trendn" class="input numinput" type="number" min="5" max="500" step="5" value="20">
+            <span class="muted">个账号（回车生效；两张排行右侧都有滑块可上下滚动）</span>
+          </div>
+          <div class="cap"><b>① 播放增量排行</b> — 每个账号在两次快照之间<b>新增的播放量</b>（不是总播放，是这段时间涨了多少）。
+            越靠上说明这段时间吸量越猛，和「总播放排行」不同——那个奖励历史积累，这个只看当下。</div>
+          <div class="chart" id="chart-velocity"></div>
+          <div class="cap"><b>② 粉丝增量排行</b> — 同样区间内的<b>粉丝净增</b>。播放涨但粉丝不涨，说明是路人流量；粉丝也在涨，才是真的在积累。
+            注意粉丝增量可能为负。</div>
+          <div class="chart" id="chart-follower"></div>
+          <div class="cap"><b>③ 存活分布变化</b> — 上次快照 vs 本次快照，各「距最近投稿天数」档位的账号数。
+            左边（&lt;1天）变多说明整体更活跃；右边（3天以上）变多说明掉队的号在增加。</div>
+          <div class="chart" id="chart-survive-trend"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

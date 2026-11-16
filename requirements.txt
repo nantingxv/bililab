@@ -1,0 +1,10 @@
+# 依赖
+#
+# 本项目**只使用 Python 标准库**（http.server / urllib / ctypes / winreg 等），
+# 不需要 pip install 任何第三方包。
+#
+# 要求：
+#   - Python 3.9 及以上
+#   - Windows 10/11（Cookie 用 Windows DPAPI 加密存储，依赖 ctypes + winreg）
+#
+# 如果你在非 Windows 系统上跑，需要自行替换 core/auth.py 里的加密实现。

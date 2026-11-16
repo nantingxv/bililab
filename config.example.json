@@ -1,0 +1,14 @@
+{
+  "cookies_enc": "",
+  "buvid": "",
+  "session": null,
+  "last_snapshot": null,
+  "auto": {
+    "enabled": false,
+    "alarms": ["00:00", "08:00", "15:00"],
+    "max_videos": 50,
+    "rate": 8.0,
+    "last_run": null,
+    "last_runs": {}
+  }
+}
